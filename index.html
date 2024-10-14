@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OCR Ijazah Extractor</title>
     <script src="https://unpkg.com/tesseract.js@v2.1.1/dist/tesseract.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script> <!-- SheetJS -->
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -18,28 +19,35 @@
             padding: 10px;
             margin: 10px 0;
         }
-        #loading {
-            display: none;
-            font-weight: bold;
+        #download-btn {
+            display: none; /* Tombol download awalnya disembunyikan */
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
         }
-        #progress {
-            font-weight: bold;
-            color: blue;
+        #download-btn:hover {
+            background-color: #45a049;
         }
     </style>
 </head>
 <body>
     <h2>Upload Folder Gambar Ijazah untuk Ekstraksi Nama dan Nomor Ijazah</h2>
-    <input type="file" id="folder-upload" accept="image/png" multiple webkitdirectory>
-    <p id="loading">Memproses gambar, harap tunggu... (<span id="progress">0</span>%)</p>
+    <input type="file" id="folder-upload" accept="image/*" webkitdirectory multiple>
+    <p id="loading" style="display: none;">Memproses gambar, harap tunggu... (<span id="progress">0</span>%)</p>
     <div id="output"></div>
+    <button id="download-btn">Download Hasil sebagai Excel</button>
 
     <script>
+        const extractedData = []; // Array untuk menyimpan hasil ekstraksi
+
         document.getElementById('folder-upload').addEventListener('change', function(event) {
             const files = event.target.files; // Mengambil semua file dalam folder
             if (files.length > 0) {
                 document.getElementById('loading').style.display = 'block';
-                processImages(files); // Memproses semua gambar yang di-upload
+                processImages(files); // Memproses semua gambar yang diupload
             } else {
                 alert('Tolong upload folder yang berisi file gambar.');
             }
@@ -50,76 +58,97 @@
             const resultsContainer = document.getElementById('output');
             resultsContainer.innerHTML = ''; // Kosongkan output sebelumnya
             let processedCount = 0;
-            const totalFiles = files.length;
 
             Array.from(files).forEach(file => {
-                if (file.type.startsWith('image/png')) { // Pastikan hanya gambar PNG yang diproses
-                    const relativePath = file.webkitRelativePath; // Mendapatkan jalur relatif dari folder yang di-upload
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        const imageUrl = e.target.result;
-                        performOCR(imageUrl, relativePath, resultsContainer, () => {
-                            processedCount++;
-                            const progressPercentage = Math.round((processedCount / totalFiles) * 100);
-                            document.getElementById('progress').innerText = progressPercentage;
-                            if (processedCount === totalFiles) {
-                                document.getElementById('loading').style.display = 'none';
-                            }
-                        });
-                    };
-                    reader.readAsDataURL(file);
-                }
+                console.log('Processing file:', file.name); // Log nama file yang sedang diproses
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const imageUrl = e.target.result;
+                    console.log('Image URL:', imageUrl); // Log URL gambar
+                    performOCR(imageUrl, file.webkitRelativePath, resultsContainer, () => {
+                        processedCount++;
+                        if (processedCount === files.length) {
+                            document.getElementById('loading').style.display = 'none';
+                            document.getElementById('download-btn').style.display = 'block'; // Tampilkan tombol download setelah semua gambar diproses
+                        }
+                    });
+                };
+                reader.onerror = function(e) {
+                    console.error('Error reading file:', e); // Log error jika ada
+                };
+                reader.readAsDataURL(file);
             });
         }
 
         // Fungsi untuk melakukan OCR menggunakan Tesseract.js
-        function performOCR(imageUrl, relativePath, resultsContainer, callback) {
+        function performOCR(imageUrl, filePath, resultsContainer, callback) {
             Tesseract.recognize(
                 imageUrl,
                 'eng',
                 {
                     logger: info => {
+                        console.log(info);  // Melihat progres di konsol
                         if (info.status === 'recognizing text') {
+                            // Update progres di layar
                             const progress = Math.round(info.progress * 100);
-                            document.getElementById('progress').innerText = progress; // Update progres di layar
+                            document.getElementById('progress').innerText = progress;
                         }
                     }
                 }
             ).then(({ data: { text } }) => {
-                console.log("Hasil OCR:", text); // Debugging untuk melihat hasil OCR
-                const nomorIjazah = extractNomorIjazah(text);  // Ekstrak nomor ijazah
-                const namaSiswa = extractNamaSiswa(text); // Ekstrak nama siswa
+                console.log('Teks hasil OCR:', text); // Log teks hasil OCR untuk debug
+                const nomorIjazah = extractNomorIjazah(text);  // Ekstrak nomor ijazah dari teks
+                const namaSiswa = extractNamaSiswa(text); // Ekstrak nama siswa dari teks
                 const resultDiv = document.createElement('div');
                 resultDiv.classList.add('result');
-                resultDiv.innerHTML = `File: ${relativePath}<br>Nama Siswa: ${namaSiswa}<br>Nomor Ijazah: ${nomorIjazah}`;
+                resultDiv.innerHTML = `File: ${filePath}<br>Nama Siswa: ${namaSiswa}<br>Nomor Ijazah: ${nomorIjazah}`;
                 resultsContainer.appendChild(resultDiv); // Menampilkan hasil di halaman
+                
+                // Tambahkan data yang diekstraksi ke array extractedData
+                extractedData.push({
+                    filePath: filePath,
+                    namaSiswa: namaSiswa,
+                    nomorIjazah: nomorIjazah
+                });
+
                 callback(); // Menandakan pemrosesan gambar selesai
             }).catch(err => {
                 console.error('Error during OCR processing:', err); // Log error saat memproses OCR
                 document.getElementById('loading').style.display = 'none';
-                alert('Terjadi kesalahan saat memproses gambar: ' + relativePath);
+                alert('Terjadi kesalahan saat memproses gambar: ' + filePath);
             });
         }
 
         // Fungsi untuk mengekstrak nomor ijazah dari teks hasil OCR
         function extractNomorIjazah(text) {
-            const cleanedText = text.replace(/[^a-zA-Z0-9\s\/-]/g, ' ').trim(); // Menghapus karakter non-alfanumerik kecuali spasi, '/', dan '-'
-            const compactText = cleanedText.replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' '); // Menghapus spasi di sekitar '/' dan menyederhanakan spasi
-            const regex = /M\/SMK\/K13-3\/\d{2}\s*\/\s*\d{7}/; // Regex untuk menangkap nomor ijazah dengan kemungkinan spasi
+            const cleanedText = text.replace(/[^a-zA-Z0-9\s\/-]/g, ' ').trim(); // Menghapus karakter non-alfanumerik, kecuali spasi, '/', dan '-'
+            const compactText = cleanedText.replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' '); // Menghapus spasi di sekitar '/' dan mengubah banyak spasi menjadi satu
+            const regex = /\b012\d{4}\b/; // Regex untuk nomor ijazah dimulai dengan "012" dan diikuti 4 digit
             const match = compactText.match(regex);
-            return match ? match[0].trim() : 'Nomor Ijazah tidak ditemukan';
+            return match ? match[0].trim() : 'Nomor Ijazah tidak ditemukan'; // Mengembalikan nomor yang dimulai dengan "012"
         }
 
         // Fungsi untuk mengekstrak nama siswa dari teks hasil OCR
         function extractNamaSiswa(text) {
-            const cleanedText = text.replace(/[^a-zA-Z0-9\s]/g, ' ').trim(); // Menghapus karakter non-alfanumerik kecuali spasi
-            const compactText = cleanedText.replace(/\s+/g, ' '); // Menghapus spasi berlebih
-
-            // Regex untuk menangkap nama setelah kata "nama" atau "NAMA:"
-            const regex = /nama\s*[:\s]*([A-Z\s]{2,})/i; // Mencari kata "NAMA:" diikuti oleh nama siswa
-            const match = compactText.match(regex);
-            return match ? match[1].trim() : 'Nama tidak ditemukan';
+            const cleanedText = text.replace(/[^a-zA-Z0-9\s]/g, ' ').trim(); // Menghapus karakter non-alfanumerik
+            const regex = /(?<=nama\s)([A-Za-z\s]+)/i; // Regex untuk mencari setelah kata "nama"
+            const match = cleanedText.match(regex);
+            return match ? match[0].trim() : 'Nama tidak ditemukan'; // Mengembalikan nama yang ditemukan
         }
+
+        // Fungsi untuk mendownload hasil sebagai file Excel
+        document.getElementById('download-btn').addEventListener('click', function() {
+            if (extractedData.length > 0) {
+                const worksheet = XLSX.utils.json_to_sheet(extractedData);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Hasil OCR");
+
+                // Download file Excel
+                XLSX.writeFile(workbook, "hasil_ekstraksi_ijazah.xlsx");
+            } else {
+                alert('Tidak ada data yang bisa didownload!');
+            }
+        });
     </script>
 </body>
 </html>
